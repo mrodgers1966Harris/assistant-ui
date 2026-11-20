@@ -853,6 +853,7 @@ function compileComponents(
         filename,
       );
     }
+    ensureStaticMembers(value, "component", "render", filename);
     if (!findMember(value, "render")) continue;
     // The client keeps `render` (and so needs the module marked `"use client"`);
     // the server drops it, since only the schema reaches the model there.
@@ -905,12 +906,17 @@ function compileToolkit(
       );
     }
 
+    ensureStaticMembers(value, "tool", "execute", filename);
+
     // Nature is inferred from `execute` (see inferToolType), not an authored
     // `type`. The resolved type is written back below so the runtime keeps it.
     const execute = findMember(value, "execute");
     const isStub = execute ? executeIsStubTool(execute) : false;
     const isExternal = execute ? executeIsExternalTool(execute) : false;
     const type = inferToolType(value, filename);
+    if (type === "provider" && execute) {
+      applyProviderToolConfig(value, execute, filename);
+    }
     const hasRender = !!findMember(value, "render");
     const hasRenderText = !!findMember(value, "renderText");
 
@@ -927,10 +933,6 @@ function compileToolkit(
         "a human tool must declare a `render` so it can collect input",
         filename,
       );
-    }
-
-    if (type === "provider" && execute) {
-      applyProviderToolConfig(value, execute, filename);
     }
 
     if (isExternal) {
@@ -1044,6 +1046,54 @@ function entryValue(entry: Entry): t.ObjectExpression | null {
     return entry.value;
   }
   return null;
+}
+
+/**
+ * Errors unless every member of a tool/component object has a unique static
+ * name. Routing finds and strips members by name, so anything that could
+ * define one at runtime under a name the compiler can't see (a spread, a
+ * computed key, a `__proto__` prototype, or a later duplicate that overrides
+ * the routed one) would survive into a build that must not have it.
+ */
+function ensureStaticMembers(
+  object: t.ObjectExpression,
+  kind: "tool" | "component",
+  routed: string,
+  filename: string | undefined,
+): void {
+  const seen = new Set<string>();
+  for (const prop of object.properties) {
+    if (t.isSpreadElement(prop)) {
+      throw new GenerativeCompileError(
+        `a ${kind} object cannot contain a spread (\`...\`); declare its ` +
+          `members inline so its \`${routed}\` can be routed`,
+        filename,
+      );
+    }
+    if (prop.computed) {
+      throw new GenerativeCompileError(
+        `a ${kind} object cannot contain a computed key (\`[key]\`); use a ` +
+          `static name so its \`${routed}\` can be routed`,
+        filename,
+      );
+    }
+    const name = memberName(prop.key, prop.computed);
+    if (name === undefined) continue;
+    if (name === "__proto__") {
+      throw new GenerativeCompileError(
+        `a ${kind} object cannot declare \`__proto__\`, which would let an ` +
+          `inherited \`${routed}\` bypass routing`,
+        filename,
+      );
+    }
+    if (seen.has(name)) {
+      throw new GenerativeCompileError(
+        `a ${kind} object cannot declare \`${name}\` more than once`,
+        filename,
+      );
+    }
+    seen.add(name);
+  }
 }
 
 /** A member of an entry object: `render`/`execute`/`type`, as property or method. */
