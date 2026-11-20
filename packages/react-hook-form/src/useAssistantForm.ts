@@ -6,6 +6,7 @@ import { type ToolCallMessagePartComponent } from "@assistant-ui/core/react";
 import { useAui } from "@assistant-ui/store";
 import { useEffect } from "react";
 import {
+  type Control,
   type FieldValues,
   type Path,
   type PathValue,
@@ -63,6 +64,38 @@ export type UseAssistantFormProps<
     | undefined;
 };
 
+export type AssistantFormConfirmationRequest = {
+  action: "submit_form" | "reset_form";
+  values: unknown;
+};
+
+export type AssistantFormConfirmationResponse = {
+  confirmed: boolean;
+};
+
+const isConfirmed = (response: unknown) =>
+  typeof response === "object" &&
+  response !== null &&
+  (response as { confirmed?: unknown }).confirmed === true;
+
+const findFormElement = (control: Pick<Control, "_names" | "_fields">) => {
+  const { _names, _fields } = control;
+  for (const name of _names.mount) {
+    const field = _fields[name];
+    if (field?._f && "refs" in field._f) {
+      const fieldReference = Array.isArray(field._f.refs)
+        ? field._f.refs[0]
+        : field._f.ref;
+
+      if (fieldReference instanceof HTMLElement) {
+        const form = fieldReference.closest("form");
+        if (form) return form;
+      }
+    }
+  }
+  return null;
+};
+
 export const useAssistantForm = <
   TFieldValues extends FieldValues = FieldValues,
   TContext = any,
@@ -89,6 +122,13 @@ export const useAssistantForm = <
           ...formTools.set_form_field,
           parameters: formTools.set_form_field.parameters,
           execute: async (args) => {
+            if (!control._names.mount.has(args.name)) {
+              return {
+                success: false,
+                message: `Unknown form field "${args.name}".`,
+              };
+            }
+
             setValue(
               args.name as Path<TFieldValues>,
               args.value as PathValue<TFieldValues, Path<TFieldValues>>,
@@ -99,42 +139,70 @@ export const useAssistantForm = <
         }),
         submit_form: tool({
           ...formTools.submit_form,
-          execute: async () => {
+          parameters: formTools.submit_form.parameters,
+          execute: async (_args, { human }) => {
             if (isSubmitting) {
               return {
                 success: false,
                 message: "The form is already submitting.",
               };
             }
-            const { _names, _fields } = control;
-            for (const name of _names.mount) {
-              const field = _fields[name];
-              if (field?._f && "refs" in field._f) {
-                const fieldReference = Array.isArray(field._f.refs)
-                  ? field._f.refs[0]
-                  : field._f.ref;
 
-                if (fieldReference instanceof HTMLElement) {
-                  const form = fieldReference.closest("form");
-                  if (form) {
-                    form.requestSubmit();
-
-                    return { success: true };
-                  }
-                }
-              }
+            const formElement = findFormElement(control);
+            if (!formElement) {
+              return {
+                success: false,
+                message:
+                  "Unable retrieve the form element. This is a coding error.",
+              };
             }
 
-            return {
-              success: false,
-              message:
-                "Unable retrieve the form element. This is a coding error.",
-            };
+            const valuesSnapshot = JSON.stringify(getValues());
+            const response = await human({
+              action: "submit_form",
+              values: JSON.parse(valuesSnapshot),
+            } satisfies AssistantFormConfirmationRequest);
+
+            if (!isConfirmed(response)) {
+              return {
+                success: false,
+                message: "The user did not confirm submitting the form.",
+              };
+            }
+
+            // The user confirmed the form and values captured above; refuse
+            // rather than submit anything they did not see.
+            if (
+              !formElement.isConnected ||
+              JSON.stringify(getValues()) !== valuesSnapshot
+            ) {
+              return {
+                success: false,
+                message:
+                  "The form changed while waiting for confirmation. Ask the user to confirm again.",
+              };
+            }
+
+            formElement.requestSubmit();
+            return { success: true };
           },
         }),
         reset_form: tool({
           ...formTools.reset_form,
-          execute: async () => {
+          parameters: formTools.reset_form.parameters,
+          execute: async (_args, { human }) => {
+            const response = await human({
+              action: "reset_form",
+              values: JSON.parse(JSON.stringify(getValues())),
+            } satisfies AssistantFormConfirmationRequest);
+
+            if (!isConfirmed(response)) {
+              return {
+                success: false,
+                message: "The user did not confirm resetting the form.",
+              };
+            }
+
             reset();
             return { success: true };
           },

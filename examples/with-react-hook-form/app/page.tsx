@@ -2,6 +2,7 @@
 
 import { SignupForm } from "@/components/SignupForm";
 import { Thread } from "@/components/assistant-ui/thread";
+import { Button } from "@/components/ui/button";
 import { Form } from "@/components/ui/form";
 import {
   ResizableHandle,
@@ -14,6 +15,7 @@ import {
   useAui,
   AuiProvider,
   Suggestions,
+  type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
 
 const SetFormFieldTool = () => {
@@ -24,7 +26,28 @@ const SetFormFieldTool = () => {
   );
 };
 
-const SubmitFormTool = () => {
+const SubmitFormTool: ToolCallMessagePartComponent = ({
+  interrupt,
+  resume,
+}) => {
+  if (interrupt) {
+    return (
+      <div className="flex items-center justify-center gap-2">
+        <p className="text-sm">Submit the form?</p>
+        <Button size="sm" onClick={() => resume({ confirmed: true })}>
+          Confirm
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => resume({ confirmed: false })}
+        >
+          Cancel
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <p className="text-center font-mono text-sm font-bold text-blue-500">
       submit_form(...)

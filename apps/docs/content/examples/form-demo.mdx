@@ -90,6 +90,7 @@ export async function POST(req: Request) {
 
 import { SignupForm } from "@/components/SignupForm";
 import { Thread } from "@/components/assistant-ui/thread";
+import { Button } from "@/components/ui/button";
 import { Form } from "@/components/ui/form";
 import {
   ResizableHandle,
@@ -102,6 +103,7 @@ import {
   useAui,
   AuiProvider,
   Suggestions,
+  type ToolCallMessagePartComponent,
 } from "@assistant-ui/react";
 
 const SetFormFieldTool = () => {
@@ -112,7 +114,28 @@ const SetFormFieldTool = () => {
   );
 };
 
-const SubmitFormTool = () => {
+const SubmitFormTool: ToolCallMessagePartComponent = ({
+  interrupt,
+  resume,
+}) => {
+  if (interrupt) {
+    return (
+      <div className="flex items-center justify-center gap-2">
+        <p className="text-sm">Submit the form?</p>
+        <Button size="sm" onClick={() => resume({ confirmed: true })}>
+          Confirm
+        </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => resume({ confirmed: false })}
+        >
+          Cancel
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <p className="text-center font-bold font-mono text-blue-500 text-sm">
       submit_form(...)
@@ -200,9 +223,10 @@ export default function Home() {
 
 1. `useAssistantForm` wraps React Hook Form's `useForm` and automatically exposes `set_form_field` and `submit_form` as frontend tools
 2. The backend receives these tool definitions via `frontendTools()` and passes them to the model
-3. When the AI calls `set_form_field`, the form field is updated directly via React Hook Form
-4. Custom `render` components display a visual indicator in the chat while the tool executes
-5. `useAui` with `Suggestions` adds pre-built prompt suggestions to the assistant UI
+3. When the AI calls `set_form_field`, the form field is updated directly via React Hook Form. Only fields registered on the form can be set
+4. When the AI calls `submit_form` (or `reset_form`), the tool pauses until the user confirms in the tool UI by calling `resume({ confirmed: true })`. The submit is refused if the form or its values change while waiting
+5. Custom `render` components display a visual indicator in the chat while the tool executes
+6. `useAui` with `Suggestions` adds pre-built prompt suggestions to the assistant UI
 
 ## Source
 
