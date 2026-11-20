@@ -76,9 +76,11 @@ export class Gorp<T extends Record<string, unknown>> {
   }
 
   apply(operations: GorpOperation[]): void {
+    let next: unknown = this._state;
     for (const op of operations) {
-      this._state = deepApply(this._state, op.path, op) as DeepReadonly<T>;
+      next = deepApply(next, op.path, op);
     }
+    this._state = next as DeepReadonly<T>;
   }
 
   /**

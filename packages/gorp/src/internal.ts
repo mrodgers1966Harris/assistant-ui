@@ -68,6 +68,23 @@ export function assertSafePathSegment(segment: string): void {
   }
 }
 
+const ARRAY_INDEX_SEGMENT = /^(?:0|[1-9]\d*)$/;
+
+/**
+ * Resolves `segment` to an index that replaces an element of an array of
+ * `length` or appends one at `length`. Anything else would let a remote op
+ * grow the array (and every later copy or serialization) without bound.
+ */
+function toArrayIndex(segment: string, length: number): number {
+  const index = ARRAY_INDEX_SEGMENT.test(segment) ? Number(segment) : NaN;
+  if (!Number.isSafeInteger(index) || index > length) {
+    throw new Error(
+      `Invalid gorp array index "${segment}" for array of length ${length}`,
+    );
+  }
+  return index;
+}
+
 export function lookupState(state: unknown, path: string[]): unknown {
   let node = state;
   for (const key of path) {
@@ -93,7 +110,7 @@ export function deepApply(
   assertSafePathSegment(head!);
 
   if (Array.isArray(target)) {
-    const index = Number(head);
+    const index = toArrayIndex(head!, target.length);
     const copy = [...target];
     copy[index] = deepApply(copy[index], rest, op);
     return copy;
