@@ -60,18 +60,51 @@ import { streamText } from "ai";
 
 export const maxDuration = 30;
 
+// Placeholder session check. Replace it with the app's real auth (Auth.js,
+// Clerk, Supabase, ...). It refuses every request in production builds.
+async function getSession(req: Request) {
+  if (process.env.NODE_ENV === "production") return null;
+  const token = req.headers.get("x-assistant-ui-session");
+  return token === "app-session" ? { userId: "dev-user" } : null;
+}
+
 export async function POST(req: Request) {
-  const { messages, config } = await req.json();
+  const session = await getSession(req);
+  if (!session) {
+    return new Response("Unauthorized", { status: 401 });
+  }
+
+  const body = await req.json().catch(() => null);
+  if (!Array.isArray(body?.messages)) {
+    return new Response("Bad Request", { status: 400 });
+  }
+
+  // Keep only the conversation turns; never forward other body fields.
+  const messages = body.messages
+    .filter(
+      (message: { role?: unknown }) =>
+        message?.role === "user" || message?.role === "assistant",
+    )
+    .map(({ role, content }: { role: "user" | "assistant"; content: any }) => ({
+      role,
+      content,
+    }));
 
   const result = streamText({
     model: openai("gpt-5.4-nano"),
+    system: "You are a helpful assistant.",
     messages,
-    ...config,
+    maxOutputTokens: 1024,
   });
 
   return result.toDataStreamResponse();
 }
 ```
+
+When writing this route:
+
+- Replace `getSession` with the project's existing session check before the route is deployed. If the project has no auth, add it or tell the user the route must stay unreachable. Never call the model before the session check passes.
+- Model settings (`model`, `system`, `maxOutputTokens`, `temperature`, `providerOptions`, `headers`, `tools`) are chosen on the server. Do not spread the request body or its `config` object into `streamText`. If the UI must pick a value, such as a model id from a model selector, read that one field and check it against a server-side allowlist.
 
 Create the assistant component:
 
