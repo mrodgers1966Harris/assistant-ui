@@ -43,3 +43,7 @@ allowBuilds:
   react-grab: false
   sharp@0.34.5: true
   sqlite3@5.1.7: true
+
+overrides:
+  seroval: ^1.6.2
+  seroval-plugins: ^1.6.2
