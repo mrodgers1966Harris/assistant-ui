@@ -2,9 +2,13 @@ import { getDistinctId, posthogServer } from "@/lib/posthog-server";
 import { createPrismTracer } from "@/lib/prism-server";
 import { injectQuoteContext } from "@assistant-ui/react-ai-sdk";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { validateDocChatInput } from "@/lib/validate-input";
+import {
+  validateClientToolsInput,
+  validateDocChatInput,
+} from "@/lib/validate-input";
 import { getModel, openai } from "@/lib/ai/provider";
 import { isAiPlaygroundEnabled } from "@/lib/feature-flags";
+import { getXuluxExamplesCatalog } from "@/lib/xulux/examples-catalog";
 import { prismAISDK } from "@aui-x/prism";
 import { withTracing } from "@posthog/ai";
 import { NextResponse } from "next/server";
@@ -71,16 +75,6 @@ const PRUNE_OPTIONS = {
   emptyMessages: "remove",
 } as const;
 
-type SelectedTemplateRequestContext = {
-  id?: unknown;
-  title?: unknown;
-  description?: unknown;
-  kind?: unknown;
-  prompt?: unknown;
-  sourcePath?: unknown;
-  docsUrl?: unknown;
-};
-
 async function prepareMessages(messages: readonly UIMessage[]) {
   const modelMessages = await convertToModelMessages(
     injectQuoteContext([...messages]),
@@ -88,34 +82,31 @@ async function prepareMessages(messages: readonly UIMessage[]) {
   return pruneMessages({ messages: modelMessages, ...PRUNE_OPTIONS });
 }
 
+// Only the template id is taken from the request; the context itself comes
+// from the server catalog so callers cannot add text after input validation.
 function formatSelectedTemplateContext(
-  selectedTemplate: SelectedTemplateRequestContext | null | undefined,
+  selectedTemplate: unknown,
 ): string | null {
   if (!selectedTemplate || typeof selectedTemplate !== "object") return null;
-  const id =
-    typeof selectedTemplate.id === "string" ? selectedTemplate.id : null;
-  const title =
-    typeof selectedTemplate.title === "string" ? selectedTemplate.title : null;
-  if (!id || !title) return null;
+  const id = (selectedTemplate as { id?: unknown }).id;
+  if (typeof id !== "string") return null;
+  const template = getXuluxExamplesCatalog().templates.find((t) => t.id === id);
+  if (!template) return null;
 
   const lines = [
     "<selected_template_context>",
-    `The user selected this ${selectedTemplate.kind === "example" ? "example" : "template"} before sending their message.`,
-    `id: ${id}`,
-    `title: ${title}`,
+    `The user selected this ${template.kind === "example" ? "example" : "template"} before sending their message.`,
+    `id: ${template.id}`,
+    `title: ${template.title}`,
+    `description: ${template.description}`,
+    `catalog_prompt: ${template.prompt}`,
   ];
 
-  if (typeof selectedTemplate.description === "string") {
-    lines.push(`description: ${selectedTemplate.description}`);
+  if (template.sourcePath) {
+    lines.push(`sourcePath: ${template.sourcePath}`);
   }
-  if (typeof selectedTemplate.prompt === "string") {
-    lines.push(`catalog_prompt: ${selectedTemplate.prompt}`);
-  }
-  if (typeof selectedTemplate.sourcePath === "string") {
-    lines.push(`sourcePath: ${selectedTemplate.sourcePath}`);
-  }
-  if (typeof selectedTemplate.docsUrl === "string") {
-    lines.push(`docsUrl: ${selectedTemplate.docsUrl}`);
+  if (template.docsUrl) {
+    lines.push(`docsUrl: ${template.docsUrl}`);
   }
 
   lines.push(
@@ -158,7 +149,7 @@ Do NOT dump all documentation categories. Keep it conversational.
 </greetings>
 
 <tools>
-You have tools to explore docs, read the monorepo source, and operate a live sandbox.
+You have tools to explore docs and operate a live sandbox.
 
 1. **listDocs** - Browse docs structure
    - Call with no path FIRST to discover available top-level sections
@@ -167,26 +158,22 @@ You have tools to explore docs, read the monorepo source, and operate a live san
 2. **readDoc** - Read a specific documentation page
    - Input: slug (e.g., "ui/thread") or URL (e.g., "/docs/ui/thread")
    - Returns: full page content
-3. **inspectSourceMap** / **readSourceMapFile** - Explore the source code of the assistant-ui monorepo
-   - Use for: grep, find, cat, awk, head, tail, wc, ls, tree, etc.
-   - Example: \`grep -r "useThread" packages/ --include="*.ts" -l\`
-   - This is not real sandbox, we just provision the mono repo code through a sourcemap
-4. **provisionSandbox** - Call this once before using the sandbox. Pass the sessionId from the request.
+3. **provisionSandbox** - Call this once before using the sandbox. Pass the sessionId from the request.
    - Creates (or resumes) a cloud sandbox tied to this session
-5. **exec** - Run any shell command in the live sandbox
+4. **exec** - Run any shell command in the live sandbox
    - Write files: \`printf '%s' "$CONTENT" > /workspace/file.ts\` or use \`tee\`
    - Read files: \`cat /workspace/file.ts\`
    - Install deps: \`cd /workspace && npm install\`
    - Start the server: see <running_the_server> below — this is the step that breaks most often, follow it exactly
    - All standard shell tools available: grep, find, ls, tree, curl, lsof, etc.
-6. **refreshCanvas** - Send the preview URL to the client
+5. **refreshCanvas** - Send the preview URL to the client
    - Only after the server is ready and responding on port 3000
    - Returns: preview URL
 </tools>
 
 <recommended_pattern>
 - User asks a question →
-- **Discovery**: agent starts with listDocs to find relevant section → readDoc to get content -> bash to explore the source code
+- **Discovery**: agent starts with listDocs to find relevant section → readDoc to get content
 - **Planning**: agent plans how to implement the user's request based on **Discovery** results
 - **Execution**: agent provisions the sandbox -> executes the plan -> checks server readiness <running_the_server> -> uses refreshCanvas to send the preview URL to the client
 
@@ -258,7 +245,6 @@ export async function POST(req: Request): Promise<Response> {
     const {
       messages,
       tools: clientTools,
-      system: pageContext,
       config,
       sessionId,
       selectedTemplate,
@@ -268,6 +254,9 @@ export async function POST(req: Request): Promise<Response> {
 
     const inputError = validateDocChatInput(prunedMessages);
     if (inputError) return inputError;
+
+    const toolsError = validateClientToolsInput(clientTools);
+    if (toolsError) return toolsError;
 
     const isFirstUserTurn =
       prunedMessages.filter((m) => m.role === "user").length === 1 &&
@@ -344,7 +333,7 @@ export async function POST(req: Request): Promise<Response> {
       ...(modelConfig.providerOptions
         ? { providerOptions: modelConfig.providerOptions }
         : undefined),
-      system: [SYSTEM_PROMPT, pageContext].filter(Boolean).join("\n\n"),
+      system: SYSTEM_PROMPT,
       messages: prunedMessages,
       maxOutputTokens: 8192,
       stopWhen: stepCountIs(50),

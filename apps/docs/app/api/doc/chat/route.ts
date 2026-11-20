@@ -1,15 +1,15 @@
 import { getLLMText } from "@/lib/get-llm-text";
 import { getDistinctId, posthogServer } from "@/lib/posthog-server";
 import { createPrismTracer } from "@/lib/prism-server";
-import { readFileSync } from "node:fs";
-import path from "node:path";
 import { injectQuoteContext } from "@assistant-ui/react-ai-sdk";
 import { checkRateLimit } from "@/lib/rate-limit";
-import { validateDocChatInput } from "@/lib/validate-input";
+import {
+  validateClientToolsInput,
+  validateDocChatInput,
+} from "@/lib/validate-input";
 import { source, examples as examplesSource } from "@/lib/source";
 import { getModel } from "@/lib/ai/provider";
 import { frontendTools } from "@assistant-ui/react-ai-sdk";
-import { createBashTool } from "bash-tool";
 import { prismAISDK } from "@aui-x/prism";
 import { withTracing } from "@posthog/ai";
 import {
@@ -23,37 +23,6 @@ import {
 import type * as PageTree from "fumadocs-core/page-tree";
 import type { UIMessage } from "ai";
 import z from "zod";
-
-const SOURCE_SNAPSHOT_PATH = path.join(
-  process.cwd(),
-  "generated",
-  "source-snapshot.json",
-);
-
-function loadSourceSnapshot(): Record<string, string> {
-  try {
-    return JSON.parse(readFileSync(SOURCE_SNAPSHOT_PATH, "utf-8")) as Record<
-      string,
-      string
-    >;
-  } catch (error) {
-    if (
-      error &&
-      typeof error === "object" &&
-      "code" in error &&
-      error.code === "ENOENT"
-    ) {
-      console.warn(
-        `Missing source snapshot at ${SOURCE_SNAPSHOT_PATH}; repo tools will be unavailable until generate:docs runs.`,
-      );
-      return {};
-    }
-
-    throw error;
-  }
-}
-
-const SOURCE_SNAPSHOT = loadSourceSnapshot();
 
 function normalizeSegment(name: string): string {
   return name.toLowerCase().replace(/\s+/g, "-");
@@ -161,55 +130,25 @@ export async function prepareDocChatMessages(messages: readonly UIMessage[]) {
   });
 }
 
-function createRepoTools() {
-  let bashToolkitPromise: Promise<
-    Awaited<ReturnType<typeof createBashTool>>
-  > | null = null;
+const MAX_PAGE_PATH_LENGTH = 512;
 
-  const getBashToolkit = () => {
-    if (!bashToolkitPromise) {
-      bashToolkitPromise = createBashTool({
-        files: SOURCE_SNAPSHOT,
-        destination: "/repo",
-        maxFiles: 5000,
-        maxOutputLength: 15000,
-      });
-    }
+// The page context is resolved against the docs source on the server so that
+// callers cannot place their own text in the system prompt.
+function buildPageContext(pagePath: unknown): string | null {
+  if (typeof pagePath !== "string" || pagePath.length > MAX_PAGE_PATH_LENGTH) {
+    return null;
+  }
 
-    return bashToolkitPromise;
-  };
+  const [root, ...slugs] = pagePath.split("/").filter(Boolean);
+  const page =
+    root === "docs"
+      ? source.getPage(slugs)
+      : root === "examples"
+        ? examplesSource.getPage(slugs)
+        : undefined;
+  if (!page) return null;
 
-  return {
-    bash: tool({
-      description:
-        "Execute bash commands in the /repo sandbox containing the assistant-ui monorepo.",
-      inputSchema: zodSchema(
-        z.object({
-          command: z
-            .string()
-            .describe("The bash command to execute from the /repo directory."),
-        }),
-      ),
-      execute: async ({ command }, options) => {
-        const { tools } = await getBashToolkit();
-        return tools.bash.execute!({ command }, options);
-      },
-    }),
-    readFile: tool({
-      description: "Read the contents of a source file from the /repo sandbox.",
-      inputSchema: zodSchema(
-        z.object({
-          path: z
-            .string()
-            .describe("The repo-relative file path to read from /repo."),
-        }),
-      ),
-      execute: async ({ path }, options) => {
-        const { tools } = await getBashToolkit();
-        return tools.readFile.execute!({ path }, options);
-      },
-    }),
-  };
+  return `The user is currently viewing: ${page.url}`;
 }
 
 const SYSTEM_PROMPT = `You are the assistant-ui docs assistant.
@@ -262,18 +201,6 @@ You have two documentation tools:
 - User mentions a specific path → readDoc directly
 </tools>
 
-<source_code_tools>
-You also have tools for exploring the actual assistant-ui source code:
-
-3. **bash** - Execute bash commands in a sandbox containing the full monorepo
-   - The sandbox is at /repo with the complete source tree
-   - Use for: grep, find, cat, awk, head, tail, wc, ls, tree, etc.
-   - Example: \`grep -r "useThread" packages/ --include="*.ts" -l\`
-
-4. **readFile** - Read a specific source file by path
-   - More token-efficient than \`cat\` for reading whole files
-</source_code_tools>
-
 <answering>
 - Use the documentation tools to find relevant information
 - **CRITICAL: ONLY use URLs that are explicitly returned by your tools**
@@ -299,12 +226,15 @@ export async function POST(req: Request): Promise<Response> {
     if (rateLimitResponse) return rateLimitResponse;
 
     const body = await req.json();
-    const { messages, tools, system: pageContext, config } = body;
+    const { messages, tools, pagePath, config } = body;
 
     const prunedMessages = await prepareDocChatMessages(messages);
 
     const inputError = validateDocChatInput(prunedMessages);
     if (inputError) return inputError;
+
+    const toolsError = validateClientToolsInput(tools);
+    if (toolsError) return toolsError;
 
     const baseModel = getModel(config?.modelName);
     const distinctId = getDistinctId(req);
@@ -328,17 +258,16 @@ export async function POST(req: Request): Promise<Response> {
         })
       : null;
 
-    const repoTools = createRepoTools();
-
     const result = streamText({
       model: prism?.model ?? posthogModel,
-      system: [SYSTEM_PROMPT, pageContext].filter(Boolean).join("\n\n"),
+      system: [SYSTEM_PROMPT, buildPageContext(pagePath)]
+        .filter(Boolean)
+        .join("\n\n"),
       messages: prunedMessages,
       maxOutputTokens: 8192,
       stopWhen: stepCountIs(25),
       tools: {
-        ...frontendTools(tools),
-        ...repoTools,
+        ...frontendTools(tools ?? {}),
         listDocs: tool({
           description:
             "List documentation pages. Use with no path for root categories, or specify path to browse a section.",

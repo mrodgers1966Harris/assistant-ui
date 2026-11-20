@@ -4,7 +4,6 @@ import {
   AssistantRuntimeProvider,
   type FeedbackAdapter,
   SimpleImageAttachmentAdapter,
-  useAssistantInstructions,
   useAui,
   useAuiEvent,
 } from "@assistant-ui/react";
@@ -52,20 +51,6 @@ const feedbackAdapter: FeedbackAdapter = {
     // The runtime automatically updates message.metadata.submittedFeedback
   },
 };
-
-function AssistantPageContext() {
-  const currentPage = useCurrentPage();
-  const pathname = currentPage?.pathname;
-
-  useAssistantInstructions({
-    instruction: pathname
-      ? `The user is currently viewing: ${pathname}`
-      : "The user is on the docs site.",
-    disabled: !pathname,
-  });
-
-  return null;
-}
 
 function AssistantAnalyticsTracker() {
   const aui = useAui();
@@ -164,9 +149,16 @@ export function DocsAssistantRuntimeProvider({
 }: {
   children: ReactNode;
 }) {
+  const pathname = useCurrentPage()?.pathname;
+  const pathnameRef = useRef(pathname);
+  useEffect(() => {
+    pathnameRef.current = pathname;
+  }, [pathname]);
+
   const runtime = useChatRuntime({
     transport: new AssistantChatTransport({
       api: "/api/doc/chat",
+      body: () => ({ pagePath: pathnameRef.current }),
     }),
     sendAutomaticallyWhen: lastAssistantMessageIsCompleteWithToolCalls,
     adapters: {
@@ -178,7 +170,6 @@ export function DocsAssistantRuntimeProvider({
   return (
     <AssistantRuntimeProvider runtime={runtime}>
       <AssistantAnalyticsTracker />
-      <AssistantPageContext />
       {children}
     </AssistantRuntimeProvider>
   );

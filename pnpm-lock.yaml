@@ -125,9 +125,6 @@ importers:
       assistant-stream:
         specifier: workspace:*
         version: link:../../packages/assistant-stream
-      bash-tool:
-        specifier: ^1.3.17
-        version: 1.3.17(ai@6.0.205(zod@4.4.3))(just-bash@3.0.1)
       beautiful-mermaid:
         specifier: ^1.1.3
         version: 1.1.3
@@ -10829,19 +10826,6 @@ packages:
     resolution: {integrity: sha512-girxaJ7WZssDOFhzCGZTDKoTa1gk6A1TbflaYTpykLJ4UU9Fz9kx1aREM8JCuoVHbL8X8T/mJg7w2oYSq72Oig==}
     engines: {node: '>=6.0.0'}
     hasBin: true
-
-  bash-tool@1.3.17:
-    resolution: {integrity: sha512-Pgmiu85adxMsNX5q/6dK4kPfPvOkuZX0nH1OOoVv7xqK1NegFQZzlWEqOZlCZuYxC+DFqiJ0V26bOGbdtoZTpA==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      '@vercel/sandbox': '*'
-      ai: ^6.0.0
-      just-bash: ^2.9.3 || ^3.0.0
-    peerDependenciesMeta:
-      '@vercel/sandbox':
-        optional: true
-      just-bash:
-        optional: true
 
   basic-auth@2.0.1:
     resolution: {integrity: sha512-NF+epuEdnUYVlGuhaxbbq+dvJttwLnGY+YixlXlME5KpQ5W3CnXA5cVTneY3SPbPDRkcjMbifrwmFYcClgOZeg==}
@@ -24262,15 +24246,6 @@ snapshots:
   base64-js@1.5.1: {}
 
   baseline-browser-mapping@2.10.37: {}
-
-  bash-tool@1.3.17(ai@6.0.205(zod@4.4.3))(just-bash@3.0.1):
-    dependencies:
-      ai: 6.0.205(zod@4.4.3)
-      fast-glob: 3.3.3
-      yaml: 2.9.0
-      zod: 3.25.76
-    optionalDependencies:
-      just-bash: 3.0.1
 
   basic-auth@2.0.1:
     dependencies:
