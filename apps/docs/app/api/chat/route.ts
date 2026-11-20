@@ -6,6 +6,11 @@ import { validateGeneralChatInput } from "@/lib/validate-input";
 import { getModel } from "@/lib/ai/provider";
 import { AISDKToolkit } from "@assistant-ui/react-ai-sdk";
 import docsToolkit from "@/lib/docs-toolkit";
+import { GENERAL_CHAT_FRONTEND_TOOLS } from "@/lib/ai/general-chat-tools";
+import {
+  conversationMessages,
+  selectFrontendTools,
+} from "@/lib/ai/public-chat";
 import { prismAISDK } from "@aui-x/prism";
 import { withTracing } from "@posthog/ai";
 import {
@@ -13,11 +18,14 @@ import {
   pruneMessages,
   stepCountIs,
   streamText,
+  type UIMessage,
 } from "ai";
 
 export const maxDuration = 30;
 
 const aiToolkit = new AISDKToolkit({ toolkit: docsToolkit });
+
+const SYSTEM_PROMPT = `You are the demo assistant on assistant-ui.com, the site for assistant-ui, a React library for building AI chat interfaces. Be friendly and concise. Use the tools available to you when they help answer the user's request.`;
 
 const ALLOWED_ORIGINS = [
   "https://assistant-ui-expo.vercel.app",
@@ -45,14 +53,8 @@ export async function POST(req: Request) {
     if (rateLimitResponse) return rateLimitResponse;
 
     const body = await req.json();
-    const { messages, system: rawSystem, tools, config } = body;
-
-    // Basic validation: only accept short system prompts to limit abuse surface
-    const MAX_SYSTEM_LENGTH = 4000;
-    const system =
-      typeof rawSystem === "string" && rawSystem.length <= MAX_SYSTEM_LENGTH
-        ? rawSystem
-        : undefined;
+    const { tools, config } = body;
+    const messages = conversationMessages(body.messages);
 
     const inputError = validateGeneralChatInput(messages);
     if (inputError) {
@@ -86,17 +88,21 @@ export async function POST(req: Request) {
       : null;
 
     const prunedMessages = pruneMessages({
-      messages: await convertToModelMessages(injectQuoteContext(messages)),
+      messages: await convertToModelMessages(
+        injectQuoteContext(messages as UIMessage[]),
+      ),
       reasoning: "none",
     });
 
     const result = streamText({
       model: prism?.model ?? posthogModel,
-      ...(system ? { system } : {}),
+      system: SYSTEM_PROMPT,
       messages: prunedMessages,
       maxOutputTokens: 4096,
       stopWhen: stepCountIs(10),
-      tools: await aiToolkit.tools({ frontend: tools }),
+      tools: await aiToolkit.tools({
+        frontend: selectFrontendTools(GENERAL_CHAT_FRONTEND_TOOLS, tools),
+      }),
       onFinish: async () => {
         await prism?.end();
       },

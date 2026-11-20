@@ -5,6 +5,7 @@ import { checkRateLimit } from "@/lib/rate-limit";
 import { validateDocChatInput } from "@/lib/validate-input";
 import { getModel, openai } from "@/lib/ai/provider";
 import { isAiPlaygroundEnabled } from "@/lib/feature-flags";
+import { conversationMessages } from "@/lib/ai/public-chat";
 import { prismAISDK } from "@aui-x/prism";
 import { withTracing } from "@posthog/ai";
 import { NextResponse } from "next/server";
@@ -255,14 +256,8 @@ export async function POST(req: Request): Promise<Response> {
     if (rateLimitResponse) return rateLimitResponse;
 
     const body = await req.json();
-    const {
-      messages,
-      tools: clientTools,
-      system: pageContext,
-      config,
-      sessionId,
-      selectedTemplate,
-    } = body;
+    const { config, sessionId, selectedTemplate } = body;
+    const messages = conversationMessages(body.messages) as UIMessage[];
 
     const prunedMessages = await prepareMessages(messages);
 
@@ -294,7 +289,6 @@ export async function POST(req: Request): Promise<Response> {
     const distinctId = getDistinctId(req);
     const prismTracer = createPrismTracer({ evalRunId, localTraceUrl });
     const xuluxTools = createXuluxChatTools({
-      clientTools,
       sessionId,
       routeUrl: req.url,
     });
@@ -344,7 +338,7 @@ export async function POST(req: Request): Promise<Response> {
       ...(modelConfig.providerOptions
         ? { providerOptions: modelConfig.providerOptions }
         : undefined),
-      system: [SYSTEM_PROMPT, pageContext].filter(Boolean).join("\n\n"),
+      system: SYSTEM_PROMPT,
       messages: prunedMessages,
       maxOutputTokens: 8192,
       stopWhen: stepCountIs(50),
