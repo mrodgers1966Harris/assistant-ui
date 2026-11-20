@@ -7,8 +7,7 @@
     "dev": "pnpm generate:all && next dev",
     "build": "pnpm generate:all && next build",
     "generate:reference-docs": "tsx ./scripts/generate-reference-docs.mts",
-    "generate:source-snapshot": "tsx ./scripts/generate-source-snapshot.mts",
-    "generate:all": "pnpm generate:reference-docs && pnpm generate:source-snapshot",
+    "generate:all": "pnpm generate:reference-docs",
     "start": "next start",
     "postinstall": "fumadocs-mdx"
   },
@@ -43,7 +42,6 @@
     "@vercel/analytics": "^2.0.1",
     "ai": "^6.0.205",
     "assistant-stream": "workspace:*",
-    "bash-tool": "^1.3.17",
     "beautiful-mermaid": "^1.1.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

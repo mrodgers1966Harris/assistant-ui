@@ -1,5 +1,8 @@
 import { checkRateLimit } from "@/lib/rate-limit";
-import { validateGeneralChatInput } from "@/lib/validate-input";
+import {
+  validateClientToolsInput,
+  validateGeneralChatInput,
+} from "@/lib/validate-input";
 import { getModel } from "@/lib/ai/provider";
 import { isAiPlaygroundEnabled } from "@/lib/feature-flags";
 import { frontendTools } from "@assistant-ui/react-ai-sdk";
@@ -150,6 +153,9 @@ export async function POST(req: Request) {
 
     const inputError = validateGeneralChatInput(messages);
     if (inputError) return inputError;
+
+    const toolsError = validateClientToolsInput(tools);
+    if (toolsError) return toolsError;
 
     // Guard against oversized configs (token inflation / DoS)
     const configStr = JSON.stringify(builderConfig ?? {});

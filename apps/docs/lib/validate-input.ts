@@ -84,3 +84,26 @@ export function validateDocChatInput(messages: unknown): Response | null {
   }
   return null;
 }
+
+const MAX_CLIENT_TOOLS = 32;
+const MAX_CLIENT_TOOLS_CHARS = 16_000; // ~4k tokens
+
+/**
+ * Frontend tool definitions are forwarded to the model as tool descriptions and
+ * schemas, so they are bounded like message input.
+ */
+export function validateClientToolsInput(tools: unknown): Response | null {
+  if (tools === undefined || tools === null) return null;
+  if (typeof tools !== "object" || Array.isArray(tools)) {
+    return new Response("Invalid tools format", { status: 400 });
+  }
+  if (Object.keys(tools).length > MAX_CLIENT_TOOLS) {
+    return new Response(`Too many tools (max ${MAX_CLIENT_TOOLS})`, {
+      status: 400,
+    });
+  }
+  if (JSON.stringify(tools).length > MAX_CLIENT_TOOLS_CHARS) {
+    return new Response("Tools too long", { status: 400 });
+  }
+  return null;
+}
