@@ -6,9 +6,9 @@ import path from "node:path";
 import { injectQuoteContext } from "@assistant-ui/react-ai-sdk";
 import { checkRateLimit } from "@/lib/rate-limit";
 import { validateDocChatInput } from "@/lib/validate-input";
-import { source, examples as examplesSource } from "@/lib/source";
+import { source, examples as examplesSource, tapDocs } from "@/lib/source";
 import { getModel } from "@/lib/ai/provider";
-import { frontendTools } from "@assistant-ui/react-ai-sdk";
+import { conversationMessages } from "@/lib/ai/public-chat";
 import { createBashTool } from "bash-tool";
 import { prismAISDK } from "@aui-x/prism";
 import { withTracing } from "@posthog/ai";
@@ -140,6 +140,32 @@ function normalizeDocPath(slugOrUrl: string, routeUrl: string): string {
   }
 
   return cleaned;
+}
+
+const PAGE_CONTEXT_SOURCES = [
+  { prefix: "docs", loader: source },
+  { prefix: "examples", loader: examplesSource },
+  { prefix: "tap/docs", loader: tapDocs },
+] as const;
+
+const MAX_PATHNAME_LENGTH = 512;
+
+/**
+ * The page context names a page the server resolved, never the caller's text.
+ */
+function currentPageContext(pathname: unknown): string | undefined {
+  if (typeof pathname !== "string" || pathname.length > MAX_PATHNAME_LENGTH) {
+    return undefined;
+  }
+
+  const path = pathname.split(/[?#]/, 1)[0]!.replace(/^\/+|\/+$/g, "");
+  for (const { prefix, loader } of PAGE_CONTEXT_SOURCES) {
+    if (path !== prefix && !path.startsWith(`${prefix}/`)) continue;
+    const slugs = path.slice(prefix.length).split("/").filter(Boolean);
+    const page = loader.getPage(slugs);
+    if (page) return `The user is currently viewing: ${page.url}`;
+  }
+  return undefined;
 }
 
 export const maxDuration = 300;
@@ -299,7 +325,9 @@ export async function POST(req: Request): Promise<Response> {
     if (rateLimitResponse) return rateLimitResponse;
 
     const body = await req.json();
-    const { messages, tools, system: pageContext, config } = body;
+    const { config } = body;
+    const messages = conversationMessages(body.messages) as UIMessage[];
+    const pageContext = currentPageContext(body.pathname);
 
     const prunedMessages = await prepareDocChatMessages(messages);
 
@@ -337,7 +365,6 @@ export async function POST(req: Request): Promise<Response> {
       maxOutputTokens: 8192,
       stopWhen: stepCountIs(25),
       tools: {
-        ...frontendTools(tools),
         ...repoTools,
         listDocs: tool({
           description:
