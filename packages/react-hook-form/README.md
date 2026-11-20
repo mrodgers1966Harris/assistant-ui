@@ -21,7 +21,17 @@ export function SignupForm() {
     assistant: {
       tools: {
         set_form_field: { render: () => <FieldUpdated /> },
-        submit_form: { render: () => <FormSubmitted /> },
+        submit_form: {
+          render: ({ interrupt, resume }) =>
+            interrupt ? (
+              <ConfirmSubmit
+                onConfirm={() => resume({ confirmed: true })}
+                onCancel={() => resume({ confirmed: false })}
+              />
+            ) : (
+              <FormSubmitted />
+            ),
+        },
       },
     },
   });
@@ -30,7 +40,9 @@ export function SignupForm() {
 }
 ```
 
-The assistant gets two built-in tools: `set_form_field` to write values into fields and `submit_form` to call your submit handler.
+The assistant gets three built-in tools: `set_form_field` to write values into fields registered on the form, `submit_form` to call your submit handler, and `reset_form` to restore the default values.
+
+`submit_form` and `reset_form` never act on the model's call alone. They pause with a `human()` request and wait until your tool UI calls `resume({ confirmed: true })`. Any other payload declines. Submit is also refused if the form element or its values change while the request is pending. Without a `render` that calls `resume`, the form is never submitted or reset by the assistant.
 
 ## See also
 

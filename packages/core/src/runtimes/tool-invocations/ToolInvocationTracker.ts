@@ -436,6 +436,9 @@ export class ToolInvocationTracker {
     if (this._skipExecuteStreamIds.has(toolCallId)) return;
 
     this._executing.add(toolCallId);
+    // `execute` may have requested human input synchronously, before this
+    // callback runs; keep that interrupt visible.
+    if (this._humanInput.has(toolCallId)) return;
     this._setStatus(toolCallId, { type: "executing" });
   }
 
